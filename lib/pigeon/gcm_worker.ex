@@ -149,6 +149,15 @@ defmodule Pigeon.GCMWorker do
         unless on_response == nil do on_response.({:error, :malformed_json}) end
         new_queue = Map.delete(queue, "#{stream_id}")
         {:noreply, %{state | queue: new_queue}}
+      server_error when server_error == "500" or server_error == "503"->
+        error = case get_header(headers, "retry-after") do
+          nil  -> {:error, :retry}
+          val -> {:error, {:retry_after, val}}
+        end
+        log_error(server_error, "Server  #{inspect error}")
+        unless on_response == nil do on_response.(error) end
+        new_queue = Map.delete(queue, "#{stream_id}")
+        {:noreply, %{state | queue: new_queue}}
       code ->
         reason = parse_error(body)
         log_error(code, reason)
@@ -233,8 +242,12 @@ defmodule Pigeon.GCMWorker do
 
 
   defp get_status(headers) do
-    case Enum.find(headers, fn({key, _val}) -> key == ":status" end) do
-      {":status", status} -> status
+    get_header(headers, ":status")
+  end
+
+  def get_header(headers, header) do
+    case Enum.find(headers, fn({key, _val}) ->key == header end) do
+      {_, value} -> value
       nil -> nil
     end
   end
